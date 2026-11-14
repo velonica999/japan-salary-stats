@@ -1,0 +1,47 @@
+name: identity-check
+
+# 見張り：main に push されたコミットの作者・コミッターが想定の名前以外のとき、
+# 本文に付加行（○○-by: など）やメールアドレスがあるとき、強制 push のときに赤 → GitHub から失敗メールが届く。
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check commit identities
+        run: |
+          python3 - <<'EOF'
+          import json, os, re, sys
+          ev = json.load(open(os.environ["GITHUB_EVENT_PATH"], encoding="utf-8"))
+          OK = {
+              ("velonica999", "velonica999@users.noreply.github.com"),
+              ("velonica999", "47669388+velonica999@users.noreply.github.com"),   # 本人の GitHub 画面からの操作
+              ("GitHub", "noreply@github.com"),                                    # 画面からの操作のコミッター
+              ("github-actions[bot]", "41898282+github-actions[bot]@users.noreply.github.com"),
+          }
+          BAD_TEXT = re.compile(r"^[a-z-]+-(by|session):|[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}|https?://", re.I | re.M)
+          ng = []
+          if ev.get("forced"):
+              ng.append("強制 push（履歴の書き換え）を検知。運営者の了承済みか確認すること")
+          for c in ev.get("commits", []):
+              sha = c["id"][:8]
+              for role in ("author", "committer"):
+                  p = c.get(role) or {}
+                  who = (p.get("name", ""), p.get("email", ""))
+                  if who not in OK:
+                      ng.append(f"{sha} の{role}が想定外：{who[0]} <{who[1]}>")
+              if BAD_TEXT.search(c.get("message", "")):
+                  ng.append(f"{sha} の本文に付加行・外部アドレス")
+          print(f"検査したコミット：{len(ev.get('commits', []))} 件")
+          if ng:
+              for m in ng:
+                  print(f"::error::{m}")
+              sys.exit(1)
+          print("OK：すべて velonica999／本人の画面操作／github-actions[bot]")
+          EOF

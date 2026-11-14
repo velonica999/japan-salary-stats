@@ -1,0 +1,45 @@
+name: sync-data
+
+# 毎日、給料相場.com の /data/ から CSV を取り込み、変わっていればコミットする。
+# 自分で作る鍵・トークン・Secrets は使わない（公開ページを読むだけ。push と Issue はこのリポジトリ専用の自動トークン GITHUB_TOKEN）。
+# 赤になったら：サイトが落ちている・CSV の形が変わった等。前の CSV はそのまま残る。
+
+on:
+  schedule:
+    - cron: "23 21 * * *"   # 毎日 6:23（日本時間）
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write   # CSV が 20MB を超えたときに Issue を立てる（運営者へのメール通知）
+
+concurrency:
+  group: sync-data
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Fetch CSV from kyuryo-souba.com
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python scripts/sync.py
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data
+          if git diff --cached --quiet; then
+            echo "no changes"
+          else
+            git commit -m "data update $(TZ=Asia/Tokyo date +%Y-%m-%d)"
+            git push
+          fi
